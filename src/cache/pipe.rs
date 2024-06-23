@@ -1,7 +1,6 @@
-use std::future::Future;
 use std::time::{Duration, Instant};
 
-use redis::{AsyncCommands, Msg};
+use redis::AsyncCommands;
 use tokio::sync::{
     mpsc,
     mpsc::Receiver,
@@ -31,7 +30,7 @@ pub(crate) async fn send(deadline: Option<Instant>, connection_timeout: Duration
         cache.lpush(format!("{pipe_name}:data"), data).await?;
 
         if let Err(err) = cache.pexpire::<_, ()>(format!("{pipe_name}:data"), connection_timeout.as_millis() as i64).await {
-            error!("error setting expire time, deleting queue");
+            error!(?err, "error setting expire time, deleting queue");
             _ = cache.del::<_, ()>(format!("{pipe_name}:data")).await; // ignore error
         }
         Result::<_, ProxyError>::Ok(())
@@ -64,7 +63,7 @@ impl ReceiveHandle {
         let token = CancellationToken::new();
         let token_inside = token.clone();
 
-        tokio::spawn(async move {
+        let handle = tokio::spawn(async move {
             let mut data_chan = data_sub.on_message();
             let mut result = Result::<_, ProxyError>::Ok(());
             loop {
@@ -103,6 +102,8 @@ impl ReceiveHandle {
         }
             .instrument(trace_span!(parent: None, "main_handle", pipe = pipe_name))
         );
+        #[cfg(test)]
+        crate::util::tracker::PIPE_RECEIVER.lock().await.push((pipe_name.to_string(), handle));
 
         Ok(ReceiveHandle {
             pipe_name: pipe_name.to_string(),
@@ -129,7 +130,9 @@ impl ReceiveHandle {
                 warn!("timeout receiving");
                 Err(ProxyError::Pipe("timeout receiving".to_string()))
             }
-            // TODO: deal with all chan closed
+            else => {
+                Err(ProxyError::Pipe("peer closed".to_string()))
+            }
         }
     }
 }
@@ -143,6 +146,8 @@ impl Drop for ReceiveHandle {
 
 #[cfg(test)]
 mod tests {
+    use std::ops::Deref;
+    use std::sync::Arc;
     use std::time::Duration;
 
     use tracing_subscriber::layer::SubscriberExt;
@@ -157,23 +162,48 @@ mod tests {
             .with(tracing_subscriber::fmt::layer())
             .init();
 
-        let client = redis::Client::open("redis://127.0.0.1")?;
-        let cache = RedisClient::new_redis_client_for_test(client).await;
-        let mut receive_handle = ReceiveHandle::start_receive(None, Duration::from_secs(1), &cache, "test").await?;
+        {
+            let client = redis::Client::open("redis://127.0.0.1")?;
+            let cache = RedisClient::new_redis_client_for_test(client).await;
 
-        let handle = tokio::spawn(async move {
+            let mut data: Vec<u32> = Vec::new();
             for _ in 0..30 {
-                let result = receive_handle.receive(None).await.unwrap();
-                println!("{}", String::from_utf8_lossy(&result));
+                data.push(rand::random());
             }
-            // drop(receive_handle);
-        });
+            let data = Arc::new(data);
 
-        for i in 0..40 {
-            send(None, Duration::from_secs(10), &cache, "test", i.to_string().as_bytes()).await.unwrap()
+            let mut receive_handle = ReceiveHandle::start_receive(None, Duration::from_secs(1), &cache, "test").await?;
+
+            let data_inner = Arc::clone(&data);
+
+            let handle = tokio::spawn(async move {
+                let mut i = 0;
+                loop {
+                    let result = receive_handle.receive(None).await.unwrap();
+                    if result.is_empty() {
+                        break;
+                    }
+                    // println!("{}", String::from_utf8_lossy(&result));
+                    assert_eq!(data_inner[i].to_string().as_bytes(), &result);
+                    i += 1;
+                }
+                // drop(receive_handle);
+            });
+
+            for i in data.deref() {
+                send(None, Duration::from_secs(10), &cache, "test", i.to_string().as_bytes()).await.unwrap()
+            }
+            send(None, Duration::from_secs(10), &cache, "test", &[]).await.unwrap();
+
+            tokio::join!(handle);
+
+            tokio::time::sleep(Duration::from_secs(1)).await;
         }
 
-        tokio::join!(handle);
+        let pipe_receiver = crate::util::tracker::PIPE_RECEIVER.lock().await;
+        for (name, handle) in pipe_receiver.deref() {
+            assert!(handle.is_finished(), "{} not finished", name);
+        }
 
         Ok(())
     }
