@@ -21,4 +21,23 @@ pub(crate) mod tracker {
     use crate::error::ProxyError;
 
     pub(crate) static PIPE_RECEIVER: Mutex<Vec<(String, JoinHandle<Result<(), ProxyError>>)>> = Mutex::const_new(Vec::new());
+    pub(crate) static LISTENER_HANDLER: Mutex<Vec<(String, JoinHandle<()>)>> = Mutex::const_new(Vec::new());
+
+    pub(crate) async fn get_leak_tasks() -> Vec<(String, String)> {
+        let mut result = vec![];
+        for (name, handle) in PIPE_RECEIVER.lock().await.iter() {
+            if handle.is_finished() {
+                continue;
+            }
+            result.push(("PIPE".to_string(), name.clone()));
+        }
+        for (name, handle) in LISTENER_HANDLER.lock().await.iter() {
+            if handle.is_finished() {
+                continue;
+            }
+            result.push(("LISTENER".to_string(), name.clone()));
+        }
+
+        result
+    }
 }

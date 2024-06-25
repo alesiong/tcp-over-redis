@@ -114,12 +114,12 @@ impl ReceiveHandle {
     }
 
 
-    #[instrument(level = "trace", skip(self), err(Debug))]
+    #[instrument(level = "trace", skip(self), fields(pipe = self.pipe_name), err(Debug))]
     pub(crate) async fn receive(&mut self, deadline: Option<Instant>) -> Result<Vec<u8>, ProxyError> {
         let ddl = tokio::time::sleep_until(deadline.unwrap_or_else(Instant::now).into());
         tokio::select! {
             Some(data) = self.result_rx.recv() => {
-                trace!(len=data.len(), pipe=self.pipe_name, "received data");
+                trace!(len=data.len(), "received data");
                 Ok(data)
             }
             Some(err) = self.error_rx.recv() => {
@@ -135,6 +135,10 @@ impl ReceiveHandle {
             }
         }
     }
+    
+    pub(crate) fn pipe_name(&self) -> &str {
+        &self.pipe_name
+    }
 }
 
 impl Drop for ReceiveHandle {
@@ -146,7 +150,6 @@ impl Drop for ReceiveHandle {
 
 #[cfg(test)]
 mod tests {
-    use std::ops::Deref;
     use std::sync::Arc;
     use std::time::Duration;
 
@@ -171,10 +174,10 @@ mod tests {
                 data.push(rand::random());
             }
             let data = Arc::new(data);
+            let data_inner = Arc::clone(&data);
 
             let mut receive_handle = ReceiveHandle::start_receive(None, Duration::from_secs(1), &cache, "test").await?;
 
-            let data_inner = Arc::clone(&data);
 
             let handle = tokio::spawn(async move {
                 let mut i = 0;
@@ -190,20 +193,19 @@ mod tests {
                 // drop(receive_handle);
             });
 
-            for i in data.deref() {
+            for i in data.iter() {
                 send(None, Duration::from_secs(10), &cache, "test", i.to_string().as_bytes()).await.unwrap()
             }
             send(None, Duration::from_secs(10), &cache, "test", &[]).await.unwrap();
 
             tokio::join!(handle);
-
-            tokio::time::sleep(Duration::from_secs(1)).await;
         }
 
-        let pipe_receiver = crate::util::tracker::PIPE_RECEIVER.lock().await;
-        for (name, handle) in pipe_receiver.deref() {
-            assert!(handle.is_finished(), "{} not finished", name);
-        }
+        tokio::time::sleep(Duration::from_secs(1)).await;
+
+        let leak_tasks = crate::util::tracker::get_leak_tasks().await;
+
+        assert!(leak_tasks.is_empty(), "leak tasks: {:?}", leak_tasks);
 
         Ok(())
     }
