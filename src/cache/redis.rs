@@ -16,6 +16,16 @@ impl RedisClient {
     pub(crate) async fn new_pubsub(&self) -> Result<PubSub, ProxyError> {
         Ok(self.cache.get_async_pubsub().await?)
     }
+    
+    pub async fn new(params: impl redis::IntoConnectionInfo) -> Result<Self, ProxyError> {
+        let cache = Client::open(params)?;
+        let config = deadpool_redis::Config::from_connection_info(cache.get_connection_info().clone());
+
+        Ok(RedisClient {
+            pool: config.create_pool(Some(deadpool_redis::Runtime::Tokio1))?,
+            cache,
+        })
+    }
 
     #[cfg(test)]
     pub(crate) async fn new_redis_client_for_test(cache: Client) -> Self {

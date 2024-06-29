@@ -4,9 +4,12 @@ version = "0.1.0"
 edition = "2021"
 
 [[bin]]
-name = "test-main"
-path = "src/bin/test-main/main.rs"
-required-features = ["anyhow"]
+name = "server"
+path = "src/bin/server/main.rs"
+
+[[bin]]
+name = "client"
+path = "src/bin/client/main.rs"
 
 [dependencies]
 redis = { version = "0.25.3", features = ["tokio-comp", "connection-manager"] }
@@ -19,8 +22,7 @@ tokio-stream = "0.1.15"
 deadpool-redis = "0.15.1"
 const_format = "0.2.32"
 async-stream = "0.3.5"
-anyhow = { version = "1.0.86", optional = true }
+tracing-subscriber = "0.3.18"
 
 [dev-dependencies]
-tracing-subscriber = "0.3.18"
 anyhow = "1.0.86"

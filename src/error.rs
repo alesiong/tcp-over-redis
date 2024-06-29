@@ -1,5 +1,7 @@
+use std::marker::PhantomData;
 use thiserror::Error;
 use tokio::sync::mpsc::error::SendError;
+use tracing::dispatcher::SetGlobalDefaultError;
 
 #[derive(Error, Debug)]
 pub enum ProxyError {
@@ -13,6 +15,12 @@ pub enum ProxyError {
     Pipe(String),
     #[error("pool error")]
     Pool(#[from]deadpool_redis::PoolError),
+    #[error("create pool error")]
+    CreatePool(#[from]deadpool_redis::CreatePoolError),
+    #[error("network error")]
+    IoError(#[from]std::io::Error),
+    #[error("system error")]
+    System(String),
 }
 
 impl<T> From<SendError<T>> for ProxyError {
@@ -21,8 +29,9 @@ impl<T> From<SendError<T>> for ProxyError {
     }
 }
 
-impl From<ProxyError> for std::io::Error {
-    fn from(error: ProxyError) -> Self {
-        std::io::Error::new(std::io::ErrorKind::Other, error)
+impl From<SetGlobalDefaultError> for ProxyError
+{
+    fn from(value: SetGlobalDefaultError) -> Self {
+        ProxyError::System(value.to_string())
     }
 }

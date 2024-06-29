@@ -1,5 +1,5 @@
 mod pipe;
-mod redis;
-mod connection;
+pub mod redis;
+pub mod connection;
 mod consts;
-mod listener;
+pub mod listener;

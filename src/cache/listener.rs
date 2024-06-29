@@ -31,7 +31,7 @@ impl Listener {
         let cancel = CancellationToken::new();
 
         let inner_cancel = cancel.clone();
-        let handle = tokio::spawn(async move {
+        let _handle = tokio::spawn(async move {
             loop {
                 let seq_bytes = tokio::select! {
                     recv = listener_handle.receive(None) => {
@@ -56,7 +56,7 @@ impl Listener {
         });
 
         #[cfg(test)]
-        crate::util::tracker::LISTENER_HANDLER.lock().await.push((format!("listener:{}", shard_id), handle));
+        crate::util::tracker::LISTENER_HANDLER.lock().await.push((format!("listener:{}", shard_id), _handle));
 
 
         Ok(Listener {
@@ -133,11 +133,11 @@ mod tests {
                 data.push(rand::random());
             }
             let data = Arc::new(data);
-            
+
             let data_inner = Arc::clone(&data);
             let handle_send = tokio::spawn(async move {
                 let conn = Connection::dial(None, Duration::from_secs(1), Duration::from_secs(10), cache, 1).await.unwrap();
-                let (write, _read) = conn.split();
+                let (_read, write) = conn.split();
 
                 for i in data_inner.iter() {
                     write.write(format!("{}", i).as_bytes()).await.unwrap();
@@ -146,7 +146,7 @@ mod tests {
             });
 
             let conn = listener.accept(None).await.unwrap();
-            let (_write, mut read) = conn.split();
+            let (mut read, _write) = conn.split();
             let mut i = 0;
             while let Ok(r) = read.read().await {
                 if r.is_empty() {

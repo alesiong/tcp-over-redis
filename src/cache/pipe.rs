@@ -36,9 +36,9 @@ pub(crate) async fn send(deadline: Option<Instant>, connection_timeout: Duration
         Result::<_, ProxyError>::Ok(())
     }).await??;
 
-    let pipe_name = pipe_name.to_string();
+    let notify_key = format!("{pipe_name}:notify");
     tokio::spawn(async move {
-        if let Err(err) = timeout_at(deadline, cache.publish::<_, _, ()>(format!("{pipe_name}:notify"), 0)).await {
+        if let Err(err) = timeout_at(deadline, cache.publish::<_, _, ()>(notify_key, 0)).await {
             error!(?err, "error publishing notification");
         }
     });
@@ -57,7 +57,8 @@ impl ReceiveHandle {
 
         let (result_tx, result_rx) = mpsc::channel(32);
         let (error_tx, error_rx) = mpsc::channel(32);
-        let pipe_name_string = pipe_name.to_string();
+        let data_key = format!("{pipe_name}:data");
+        let notify_key = format!("{pipe_name}:notify");
 
         let mut cache = cache.new_connection().await?;
         let token = CancellationToken::new();
@@ -74,7 +75,7 @@ impl ReceiveHandle {
                     }
                     Some(_) = data_chan.next() => {
                         trace!("received message");
-                        let data: Vec<u8> = match timeout(redis_timeout, cache.rpop(format!("{pipe_name_string}:data"), None)).await
+                        let data: Vec<u8> = match timeout(redis_timeout, cache.rpop(&data_key, None)).await
                             .map_err(ProxyError::from)
                             .and_then(|r| r.map_err(ProxyError::from)) {
                             Ok(data) => data,
@@ -97,7 +98,7 @@ impl ReceiveHandle {
             }
             // shutting down
             drop(data_chan);
-            _ = data_sub.unsubscribe(format!("{pipe_name_string}:notify")).await; // ignore error
+            _ = data_sub.unsubscribe(notify_key).await; // ignore error
             result
         }
             .instrument(trace_span!(parent: None, "main_handle", pipe = pipe_name))
@@ -135,7 +136,7 @@ impl ReceiveHandle {
             }
         }
     }
-    
+
     pub(crate) fn pipe_name(&self) -> &str {
         &self.pipe_name
     }
@@ -152,6 +153,7 @@ impl Drop for ReceiveHandle {
 mod tests {
     use std::sync::Arc;
     use std::time::Duration;
+    use tracing::Level;
 
     use tracing_subscriber::layer::SubscriberExt;
     use tracing_subscriber::util::SubscriberInitExt;
@@ -161,9 +163,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_pipe() -> Result<(), anyhow::Error> {
-        tracing_subscriber::registry()
-            .with(tracing_subscriber::fmt::layer())
-            .init();
+        let subscriber = tracing_subscriber::fmt()
+            .with_max_level(Level::TRACE)
+            .finish();
+        tracing::subscriber::set_global_default(subscriber)?;
 
         {
             let client = redis::Client::open("redis://127.0.0.1")?;
