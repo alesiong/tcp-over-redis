@@ -1,4 +1,3 @@
-use std::marker::PhantomData;
 use thiserror::Error;
 use tokio::sync::mpsc::error::SendError;
 use tracing::dispatcher::SetGlobalDefaultError;

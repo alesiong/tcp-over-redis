@@ -1,23 +1,44 @@
+use std::net::SocketAddr;
+use std::path::PathBuf;
+use std::str::FromStr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use tokio::net::{TcpListener, TcpStream};
-use tokio::time;
+use tokio::{select, time};
 use tokio_util::task::TaskTracker;
-use tracing::Level;
+use tracing::{error, info, instrument, Level};
+use tracing_subscriber::util::SubscriberInitExt;
 
 use tcp_over_redis::cache::connection::Connection;
 use tcp_over_redis::cache::redis::RedisClient;
 use tcp_over_redis::error::ProxyError;
 use tcp_over_redis::network;
 
-#[tokio::main]
-async fn main() -> Result<(), ProxyError> {
-    let subscriber = tracing_subscriber::fmt()
+#[cfg(feature = "tracing")]
+#[global_allocator]
+static ALLOC: dhat::Alloc = dhat::Alloc;
+
+fn main() -> Result<(), ProxyError> {
+    #[cfg(feature = "tracing")]
+    console_subscriber::ConsoleLayer::builder().with_default_env()
+        .server_addr(SocketAddr::from_str("127.0.0.1:6670").unwrap())
+        .init();
+
+    #[cfg(not(feature = "tracing"))]
+    tracing_subscriber::fmt()
         .with_max_level(Level::TRACE)
-        .finish();
-    tracing::subscriber::set_global_default(subscriber)?;
-    
+        .init();
+
+    tokio_main()
+}
+
+#[tokio::main]
+async fn tokio_main() -> Result<(), ProxyError> {
+    #[cfg(feature = "tracing")]
+    let _profiler = dhat::Profiler::builder()
+        .file_name(PathBuf::from("dhat-heap-server.json"))
+        .build();
     let client = RedisClient::new("redis://127.0.0.1").await?;
 
     run_server(client).await?;
@@ -25,21 +46,34 @@ async fn main() -> Result<(), ProxyError> {
     Ok(())
 }
 
+#[instrument(level = "trace", skip_all, err(Debug))]
 async fn run_server(client: RedisClient) -> Result<(), ProxyError> {
     let listener = TcpListener::bind("127.0.0.1:8080").await?;
     let client = Arc::new(client);
 
     loop {
         // TODO: timeout
-        let Ok((stream, _)) = listener.accept().await else {
+        select! {
+           accept = listener.accept() => {
+                let (stream, sock) = match accept {
+                    Ok(ok) => ok,
+                    Err(err) => {
+                        error!(?err, "error accepting connection");
+                        continue;
+                    }
+                };
+        
+                info!(remote= sock.to_string(), "accepting connection");
+        
+                tokio::spawn(handle_connection(Arc::clone(&client), stream));
+            }
             // TODO: error
-            continue;
-        };
-
-        tokio::spawn(handle_connection(Arc::clone(&client), stream));
+            _ = tokio::signal::ctrl_c() => return Ok(())
+        }
     }
 }
 
+#[instrument(level = "trace", skip_all, err(Debug))]
 async fn handle_connection(client: Arc<RedisClient>, stream: TcpStream) -> Result<(), ProxyError> {
     // TODO:
     let timeout = Duration::from_secs(60);

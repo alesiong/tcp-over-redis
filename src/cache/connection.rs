@@ -82,6 +82,14 @@ impl Connection {
             },
         )
     }
+    
+    pub fn write_pipe_name(&self) -> &str {
+        &self.write_pipe_name
+    }
+
+    pub fn read_pipe_name(&self) -> &str {
+        self.read_pipe.pipe_name()
+    }
 }
 
 impl ConnectionReader {

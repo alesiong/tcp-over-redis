@@ -13,7 +13,7 @@ path = "src/bin/client/main.rs"
 
 [dependencies]
 redis = { version = "0.25.3", features = ["tokio-comp", "connection-manager"] }
-tokio = { version = "1.38.0", features = ["rt-multi-thread", "macros", "time"] }
+tokio = { version = "1.38.0", features = ["rt-multi-thread", "macros", "time", "signal"] }
 tracing = "0.1.40"
 rand = "0.8.5"
 thiserror = "1.0.61"
@@ -23,6 +23,11 @@ deadpool-redis = "0.15.1"
 const_format = "0.2.32"
 async-stream = "0.3.5"
 tracing-subscriber = "0.3.18"
+console-subscriber = { version = "0.3.0", optional = true }
+dhat = { version = "0.3.3", optional = true }
 
 [dev-dependencies]
 anyhow = "1.0.86"
+
+[features]
+tracing = ["tokio/tracing", "console-subscriber", "dhat"]
