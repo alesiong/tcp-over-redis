@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use redis::AsyncCommands;
@@ -20,7 +21,7 @@ pub(crate) struct ReceiveHandle {
     cancellation_token: CancellationToken,
 }
 
-#[instrument(level = "trace", skip(cache, data), fields(len = data.len()), err(Debug))]
+#[instrument(level = "info", skip(cache, data), fields(len = data.len()), err(Debug))]
 pub(crate) async fn send(deadline: Option<Instant>, connection_timeout: Duration, cache: &RedisClient,
                          pipe_name: &str, data: &[u8]) -> Result<(), ProxyError> {
     trace!("sending data");
@@ -48,8 +49,8 @@ pub(crate) async fn send(deadline: Option<Instant>, connection_timeout: Duration
 }
 
 impl ReceiveHandle {
-    #[instrument(level = "trace", skip(cache), err(Debug))]
-    pub(crate) async fn start_receive(deadline: Option<Instant>, redis_timeout: Duration, cache: &RedisClient, pipe_name: &str) -> Result<ReceiveHandle, ProxyError> {
+    #[instrument(level = "info", skip(cache), err(Debug))]
+    pub(crate) async fn start_receive(deadline: Option<Instant>, redis_timeout: Duration, cache: Arc<RedisClient>, pipe_name: &str) -> Result<ReceiveHandle, ProxyError> {
         trace!("start receiving");
 
         let mut data_sub = cache.new_pubsub().await?;
@@ -60,7 +61,7 @@ impl ReceiveHandle {
         let data_key = format!("{pipe_name}:data");
         let notify_key = format!("{pipe_name}:notify");
 
-        let mut cache = cache.new_connection().await?;
+        // let mut cache = cache.new_connection().await?;
         let token = CancellationToken::new();
         let token_inside = token.clone();
 
@@ -75,7 +76,8 @@ impl ReceiveHandle {
                     }
                     Some(_) = data_chan.next() => {
                         trace!("received message");
-                        let data: Vec<u8> = match timeout(redis_timeout, cache.rpop(&data_key, None)).await
+                        let mut conn = cache.new_connection().await?;
+                        let data: Vec<u8> = match timeout(redis_timeout, conn.rpop(&data_key, None)).await
                             .map_err(ProxyError::from)
                             .and_then(|r| r.map_err(ProxyError::from)) {
                             Ok(data) => data,
@@ -115,7 +117,7 @@ impl ReceiveHandle {
     }
 
 
-    #[instrument(level = "trace", skip(self), fields(pipe = self.pipe_name), err(Debug))]
+    #[instrument(level = "info", skip(self), fields(pipe = self.pipe_name), err(Debug))]
     pub(crate) async fn receive(&mut self, deadline: Option<Instant>) -> Result<Vec<u8>, ProxyError> {
         let ddl = tokio::time::sleep_until(deadline.unwrap_or_else(Instant::now).into());
         tokio::select! {
@@ -155,9 +157,6 @@ mod tests {
     use std::time::Duration;
     use tracing::Level;
 
-    use tracing_subscriber::layer::SubscriberExt;
-    use tracing_subscriber::util::SubscriberInitExt;
-
     use crate::cache::pipe::{ReceiveHandle, send};
     use crate::cache::redis::RedisClient;
 
@@ -170,7 +169,7 @@ mod tests {
 
         {
             let client = redis::Client::open("redis://127.0.0.1")?;
-            let cache = RedisClient::new_redis_client_for_test(client).await;
+            let cache = Arc::new(RedisClient::new_redis_client_for_test(client).await);
 
             let mut data: Vec<u32> = Vec::new();
             for _ in 0..30 {
@@ -179,7 +178,7 @@ mod tests {
             let data = Arc::new(data);
             let data_inner = Arc::clone(&data);
 
-            let mut receive_handle = ReceiveHandle::start_receive(None, Duration::from_secs(1), &cache, "test").await?;
+            let mut receive_handle = ReceiveHandle::start_receive(None, Duration::from_secs(1), Arc::clone(&cache), "test").await?;
 
 
             let handle = tokio::spawn(async move {

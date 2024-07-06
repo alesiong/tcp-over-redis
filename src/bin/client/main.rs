@@ -13,15 +13,15 @@ use tcp_over_redis::cache::redis::RedisClient;
 use tcp_over_redis::error::ProxyError;
 use tcp_over_redis::network;
 
-#[cfg(feature = "tracing")]
+#[cfg(feature = "profiling")]
 #[global_allocator]
 static ALLOC: dhat::Alloc = dhat::Alloc;
 
 fn main() -> Result<(), ProxyError> {
-    #[cfg(feature = "tracing")]
+    #[cfg(feature = "profiling")]
     console_subscriber::init();
 
-    #[cfg(not(feature = "tracing"))]
+    #[cfg(not(feature = "profiling"))]
     tracing_subscriber::fmt()
         .with_max_level(Level::TRACE)
         .init();
@@ -32,11 +32,11 @@ fn main() -> Result<(), ProxyError> {
 
 #[tokio::main]
 async fn tokio_main() -> Result<(), ProxyError> {
-    #[cfg(feature = "tracing")]
+    #[cfg(feature = "profiling")]
     let _profiler = dhat::Profiler::builder()
         .file_name(PathBuf::from("dhat-heap-client.json"))
         .build();
-    
+
     let client = RedisClient::new("redis://127.0.0.1").await?;
 
     run_client(client).await?;
@@ -44,7 +44,7 @@ async fn tokio_main() -> Result<(), ProxyError> {
     Ok(())
 }
 
-#[instrument(level = "trace", skip_all, err(Debug))]
+#[instrument(level = "info", skip_all, err(Debug))]
 async fn run_client(client: RedisClient) -> Result<(), ProxyError> {
     let redis_timeout = Duration::from_secs(1);
     let connection_timeout = Duration::from_secs(30);
@@ -71,7 +71,7 @@ async fn run_client(client: RedisClient) -> Result<(), ProxyError> {
     }
 }
 
-#[instrument(level = "trace", fields(
+#[instrument(level = "info", fields(
     write_pipe = conn.write_pipe_name(), read_pipe = conn.read_pipe_name()
 ), skip_all, err(Debug))]
 async fn handle_connection(conn: Connection) -> Result<(), ProxyError> {

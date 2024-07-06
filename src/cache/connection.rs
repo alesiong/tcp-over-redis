@@ -32,7 +32,7 @@ pub struct ConnectionReader {
 }
 
 impl Connection {
-    #[instrument(level = "trace", skip(cache), err(Debug))]
+    #[instrument(level = "info", skip(cache), err(Debug))]
     pub async fn dial(deadline: Option<Instant>, redis_timeout: Duration,
                       connection_timeout: Duration, cache: Arc<RedisClient>, shard_count: i32) -> Result<Connection, ProxyError> {
         let seq: u64 = rand::random();
@@ -40,10 +40,10 @@ impl Connection {
 
         async {
             let server_handshake_pipe = format!("{}{}", REDIS_KEY_PREFIX_SERVER_HAND_SHAKE, seq);
-            let recv_handshake = ReceiveHandle::start_receive(deadline, redis_timeout, &cache, &server_handshake_pipe);
+            let recv_handshake = ReceiveHandle::start_receive(deadline, redis_timeout, Arc::clone(&cache), &server_handshake_pipe);
 
             let client_data_pipe = format!("{}{}", REDIS_KEY_PREFIX_CLIENT_DATA, seq);
-            let recv_client_data = ReceiveHandle::start_receive(deadline, redis_timeout, &cache, &client_data_pipe);
+            let recv_client_data = ReceiveHandle::start_receive(deadline, redis_timeout, Arc::clone(&cache), &client_data_pipe);
 
             let (mut server_handshake_handler, client_data_handler) = tokio::try_join!(recv_handshake, recv_client_data)?;
             trace!("started receive handshake and client data");
@@ -82,7 +82,7 @@ impl Connection {
             },
         )
     }
-    
+
     pub fn write_pipe_name(&self) -> &str {
         &self.write_pipe_name
     }
@@ -94,7 +94,7 @@ impl Connection {
 
 impl ConnectionReader {
     #[instrument(
-        level = "trace",
+        level = "info",
         skip(self),
         fields(pipe = self.read_pipe.pipe_name()),
         err(Debug)
@@ -105,7 +105,7 @@ impl ConnectionReader {
 }
 
 impl ConnectionWriter {
-    #[instrument(level = "trace", skip(self, data), fields(
+    #[instrument(level = "info", skip(self, data), fields(
         pipe = self.write_pipe_name, len = data.len()
     ), err(Debug))]
     pub async fn write(&self, data: &[u8]) -> Result<(), ProxyError> {

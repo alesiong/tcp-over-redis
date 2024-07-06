@@ -5,7 +5,7 @@ use tracing::{debug, instrument};
 use crate::cache::connection::{ConnectionReader, ConnectionWriter};
 use crate::error::ProxyError;
 
-#[instrument(level = "trace", skip_all, err(Debug))]
+#[instrument(level = "info", skip_all, err(Debug))]
 pub async fn copy_from_net(mut net: OwnedReadHalf, conn: ConnectionWriter) -> Result<(), ProxyError> {
     let mut buf = vec![0u8; 0x10000];
     let r = async {
@@ -25,7 +25,7 @@ pub async fn copy_from_net(mut net: OwnedReadHalf, conn: ConnectionWriter) -> Re
     r
 }
 
-#[instrument(level = "trace", skip_all, err(Debug))]
+#[instrument(level = "info", skip_all, err(Debug))]
 pub async fn copy_from_conn(mut conn: ConnectionReader, mut net: OwnedWriteHalf) -> Result<(), ProxyError> {
     let r = async {
         loop {

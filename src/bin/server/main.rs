@@ -15,17 +15,17 @@ use tcp_over_redis::cache::redis::RedisClient;
 use tcp_over_redis::error::ProxyError;
 use tcp_over_redis::network;
 
-#[cfg(feature = "tracing")]
+#[cfg(feature = "profiling")]
 #[global_allocator]
 static ALLOC: dhat::Alloc = dhat::Alloc;
 
 fn main() -> Result<(), ProxyError> {
-    #[cfg(feature = "tracing")]
+    #[cfg(feature = "profiling")]
     console_subscriber::ConsoleLayer::builder().with_default_env()
         .server_addr(SocketAddr::from_str("127.0.0.1:6670").unwrap())
         .init();
 
-    #[cfg(not(feature = "tracing"))]
+    #[cfg(not(feature = "profiling"))]
     tracing_subscriber::fmt()
         .with_max_level(Level::TRACE)
         .init();
@@ -35,7 +35,7 @@ fn main() -> Result<(), ProxyError> {
 
 #[tokio::main]
 async fn tokio_main() -> Result<(), ProxyError> {
-    #[cfg(feature = "tracing")]
+    #[cfg(feature = "profiling")]
     let _profiler = dhat::Profiler::builder()
         .file_name(PathBuf::from("dhat-heap-server.json"))
         .build();
@@ -46,7 +46,7 @@ async fn tokio_main() -> Result<(), ProxyError> {
     Ok(())
 }
 
-#[instrument(level = "trace", skip_all, err(Debug))]
+#[instrument(level = "info", skip_all, err(Debug))]
 async fn run_server(client: RedisClient) -> Result<(), ProxyError> {
     let listener = TcpListener::bind("127.0.0.1:8080").await?;
     let client = Arc::new(client);
@@ -62,9 +62,9 @@ async fn run_server(client: RedisClient) -> Result<(), ProxyError> {
                         continue;
                     }
                 };
-        
+
                 info!(remote= sock.to_string(), "accepting connection");
-        
+
                 tokio::spawn(handle_connection(Arc::clone(&client), stream));
             }
             // TODO: error
@@ -73,7 +73,7 @@ async fn run_server(client: RedisClient) -> Result<(), ProxyError> {
     }
 }
 
-#[instrument(level = "trace", skip_all, err(Debug))]
+#[instrument(level = "info", skip_all, err(Debug))]
 async fn handle_connection(client: Arc<RedisClient>, stream: TcpStream) -> Result<(), ProxyError> {
     // TODO:
     let timeout = Duration::from_secs(60);
