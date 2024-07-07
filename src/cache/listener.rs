@@ -113,7 +113,7 @@ mod tests {
     use std::time::{Duration, Instant};
 
     use tokio_util::task::TaskTracker;
-    use tracing::{debug, error, info, trace};
+    use tracing::{debug, error};
     use tracing::metadata::LevelFilter;
     use tracing_subscriber::Layer;
     use tracing_subscriber::layer::SubscriberExt;
