@@ -15,23 +15,23 @@ pub(crate) async fn timeout<T>(duration: Duration, future: impl Future<Output=T>
 
 #[cfg(test)]
 pub(crate) mod tracker {
-    use tokio::sync::Mutex;
+    use std::sync::Mutex;
     use tokio::task::JoinHandle;
 
     use crate::error::ProxyError;
 
-    pub(crate) static PIPE_RECEIVER: Mutex<Vec<(String, JoinHandle<Result<(), ProxyError>>)>> = Mutex::const_new(Vec::new());
-    pub(crate) static LISTENER_HANDLER: Mutex<Vec<(String, JoinHandle<()>)>> = Mutex::const_new(Vec::new());
+    pub(crate) static PIPE_RECEIVER: Mutex<Vec<(String, JoinHandle<Result<(), ProxyError>>)>> = Mutex::new(Vec::new());
+    pub(crate) static LISTENER_HANDLER: Mutex<Vec<(String, JoinHandle<()>)>> = Mutex::new(Vec::new());
 
     pub(crate) async fn get_leak_tasks() -> Vec<(String, String)> {
         let mut result = vec![];
-        for (name, handle) in PIPE_RECEIVER.lock().await.iter() {
+        for (name, handle) in PIPE_RECEIVER.lock().unwrap().iter() {
             if handle.is_finished() {
                 continue;
             }
             result.push(("PIPE".to_string(), name.clone()));
         }
-        for (name, handle) in LISTENER_HANDLER.lock().await.iter() {
+        for (name, handle) in LISTENER_HANDLER.lock().unwrap().iter() {
             if handle.is_finished() {
                 continue;
             }

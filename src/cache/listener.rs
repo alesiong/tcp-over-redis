@@ -58,7 +58,7 @@ impl Listener {
         });
 
         #[cfg(test)]
-        crate::util::tracker::LISTENER_HANDLER.lock().await.push((format!("listener:{}", shard_id), _handle));
+        crate::util::tracker::LISTENER_HANDLER.lock().unwrap().push((format!("listener:{}", shard_id), _handle));
 
 
         Ok(Listener {

@@ -65,7 +65,7 @@ impl ReceiveHandle {
         let token = CancellationToken::new();
         let token_inside = token.clone();
 
-        let handle = tokio::spawn(async move {
+        let _handle = tokio::spawn(async move {
             let mut data_chan = data_sub.on_message();
             let mut result = Result::<_, ProxyError>::Ok(());
             loop {
@@ -106,7 +106,7 @@ impl ReceiveHandle {
             .instrument(trace_span!(parent: None, "main_handle", pipe = pipe_name))
         );
         #[cfg(test)]
-        crate::util::tracker::PIPE_RECEIVER.lock().await.push((pipe_name.to_string(), handle));
+        crate::util::tracker::PIPE_RECEIVER.lock().unwrap().push((pipe_name.to_string(), _handle));
 
         Ok(ReceiveHandle {
             pipe_name: pipe_name.to_string(),
