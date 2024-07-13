@@ -1,97 +1,118 @@
+use std::ffi::OsString;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use tokio::net::TcpStream;
 use tokio::{select, time};
+use tokio::net::TcpStream;
 use tokio_util::task::TaskTracker;
-use tracing::{error, info, instrument, Level};
+use tracing::{error, info, instrument};
 
+use tcp_over_redis::{config, log, network};
 use tcp_over_redis::cache::connection::Connection;
 use tcp_over_redis::cache::listener::Listener;
 use tcp_over_redis::cache::redis::RedisClient;
-use tcp_over_redis::error::ProxyError;
-use tcp_over_redis::network;
+use tcp_over_redis::config::ClientConfig;
+use tcp_over_redis::error::{EncodingError, ProxyError};
 
 #[cfg(feature = "profiling")]
 #[global_allocator]
 static ALLOC: dhat::Alloc = dhat::Alloc;
 
 fn main() -> Result<(), ProxyError> {
+    let config_file = std::env::var_os("CONFIG")
+        .map(OsString::into_string).transpose().map_err(EncodingError::OsString)?
+        .unwrap_or_else(|| "client_config.toml".to_string());
+    let client_config: ClientConfig = config::load_config_from_file(&config_file)?;
+
     #[cfg(feature = "profiling")]
     console_subscriber::init();
 
     #[cfg(not(feature = "profiling"))]
-    tracing_subscriber::fmt()
-        .with_max_level(Level::TRACE)
-        .init();
+    log::init_log(&client_config.common)?;
 
-    tokio_main()
+    tokio_main(client_config)
 }
 
 
 #[tokio::main]
-async fn tokio_main() -> Result<(), ProxyError> {
+async fn tokio_main(client_config: ClientConfig) -> Result<(), ProxyError> {
     #[cfg(feature = "profiling")]
     let _profiler = dhat::Profiler::builder()
         .file_name(PathBuf::from("dhat-heap-client.json"))
         .build();
 
-    let client = RedisClient::new("redis://127.0.0.1").await?;
+    let redis_config = if client_config.common.redis_password.is_empty() {
+        format!("redis://{}", client_config.common.redis_addr)
+    } else {
+        format!("redis://:{}@{}", client_config.common.redis_password, client_config.common.redis_addr)
+    };
 
-    run_client(client).await?;
+    let client = RedisClient::new(redis_config).await?;
+
+    run_client(client, client_config).await?;
 
     Ok(())
 }
 
 #[instrument(level = "info", skip_all, err(Debug))]
-async fn run_client(client: RedisClient) -> Result<(), ProxyError> {
-    let redis_timeout = Duration::from_secs(1);
-    let connection_timeout = Duration::from_secs(30);
+async fn run_client(client: RedisClient, client_config: ClientConfig) -> Result<(), ProxyError> {
+    let redis_timeout = Duration::from_millis(client_config.common.redis_timeout_milli);
+    let connection_timeout = Duration::from_secs(client_config.common.connection_timeout_second);
 
-    let mut listener = Listener::listen(Some(Instant::now() + redis_timeout), redis_timeout, connection_timeout, Arc::new(client), 0).await?;
+    let client = Arc::new(client);
+    let tracker = TaskTracker::new();
+    let proxy_to_addr = Arc::new(client_config.proxy_to_addr);
 
-    loop {
-        select! {
-            accept = listener.accept(None) => {
-                let conn = match accept {
-                    Ok(conn) => conn,
-                    Err(err) => {
-                        error!(?err, "error accepting connection");
-                        continue;
+    for i in 0..client_config.common.listen_shard {
+        let mut listener = Listener::listen(Some(Instant::now() + redis_timeout), redis_timeout, connection_timeout, Arc::clone(&client), i).await?;
+        let proxy_to_addr = Arc::clone(&proxy_to_addr);
+        tracker.spawn(async move {
+            loop {
+                let proxy_to_addr = Arc::clone(&proxy_to_addr);
+                select! {
+                    accept = listener.accept(None) => {
+                        let conn = match accept {
+                            Ok(conn) => conn,
+                            Err(err) => {
+                                error!(?err, "error accepting connection");
+                                continue;
+                            }
+                        };
+                        info!("accepting connection");
+
+                        tokio::spawn(handle_connection(conn, connection_timeout, proxy_to_addr));
                     }
-                };
-                info!("accepting connection");
-
-                tokio::spawn(handle_connection(conn));
+                    // TODO: error
+                    _ = tokio::signal::ctrl_c() => return
+                }
             }
-            // TODO: error
-            _ = tokio::signal::ctrl_c() => return Ok(())
-        }
+        });
     }
+    tracker.close();
+    tracker.wait().await;
+    Ok(())
 }
 
 #[instrument(level = "info", fields(
     write_pipe = conn.write_pipe_name(), read_pipe = conn.read_pipe_name()
 ), skip_all, err(Debug))]
-async fn handle_connection(conn: Connection) -> Result<(), ProxyError> {
-    let timeout = Duration::from_secs(60);
+async fn handle_connection(conn: Connection, connection_timeout: Duration, proxy_to_addr: Arc<String>) -> Result<(), ProxyError> {
 
     // TODO: timeout
-    // let stream = TcpStream::connect("44.206.219.79:80").await?;
-    let stream = TcpStream::connect("127.0.0.1:8000").await?;
+    let stream = TcpStream::connect(proxy_to_addr.as_str()).await?;
     let (read_net, write_net) = stream.into_split();
     let (read_conn, write_conn) = conn.split();
 
-    let copy1 = network::copy_from_net(read_net, write_conn);
-    let copy2 = network::copy_from_conn(read_conn, write_net);
+    let copy1 = network::copy(read_net, write_conn);
+    let copy2 = network::copy(read_conn, write_net);
 
     let tracker = TaskTracker::new();
     tracker.spawn(copy1);
     tracker.spawn(copy2);
     tracker.close();
 
-    time::timeout(timeout, tracker.wait()).await?;
+    time::timeout(connection_timeout, tracker.wait()).await?;
 
     Ok(())
 }

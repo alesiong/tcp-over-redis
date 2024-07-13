@@ -34,7 +34,7 @@ pub struct ConnectionReader {
 impl Connection {
     #[instrument(level = "info", skip(cache), err(Debug))]
     pub async fn dial(deadline: Option<Instant>, redis_timeout: Duration,
-                      connection_timeout: Duration, cache: Arc<RedisClient>, shard_count: i32) -> Result<Connection, ProxyError> {
+                      connection_timeout: Duration, cache: Arc<RedisClient>, shard_count: u32) -> Result<Connection, ProxyError> {
         let seq: u64 = rand::random();
         let seq_bytes = &seq.to_be_bytes();
 

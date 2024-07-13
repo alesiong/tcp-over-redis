@@ -1,2 +1,5 @@
 /target
 /.idea
+server_config.toml
+client_config.toml
+/data
