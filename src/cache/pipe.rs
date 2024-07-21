@@ -29,12 +29,10 @@ pub(crate) async fn send(deadline: Option<Instant>, connection_timeout: Duration
 
     let mut cache = cache.new_connection().await?;
     timeout_at(deadline, async {
-        cache.lpush(format!("{pipe_name}:data"), data).await?;
-
-        if let Err(err) = cache.pexpire::<_, ()>(format!("{pipe_name}:data"), connection_timeout.as_millis() as i64).await {
-            error!(?err, "error setting expire time, deleting queue");
-            _ = cache.del::<_, ()>(format!("{pipe_name}:data")).await; // ignore error
-        }
+        redis::pipe().atomic()
+            .lpush(format!("{pipe_name}:data"), data)
+            .pexpire(format!("{pipe_name}:data"), connection_timeout.as_millis() as i64)
+            .query_async(&mut cache).await?;
         Result::<_, ProxyError>::Ok(())
     }).await??;
 

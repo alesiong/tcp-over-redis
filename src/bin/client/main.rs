@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 use tokio::{select, time};
 use tokio::net::TcpStream;
 use tokio_util::task::TaskTracker;
-use tracing::{error, info, instrument};
+use tracing::{debug, error, info, instrument};
 
 use tcp_over_redis::{config, log, network};
 use tcp_over_redis::cache::connection::Connection;
@@ -79,7 +79,8 @@ async fn run_client(client: RedisClient, client_config: ClientConfig) -> Result<
                                 continue;
                             }
                         };
-                        info!("accepting connection");
+                       
+                        debug!(write_pipe=conn.write_pipe_name(), "accepting connection");
 
                         tokio::spawn(handle_connection(conn, connection_timeout, proxy_to_addr));
                     }

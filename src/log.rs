@@ -11,9 +11,11 @@ use crate::error::ProxyError;
 pub fn init_log(common: &CommonConfig) -> Result<(), ProxyError> {
     let mut layers = vec![];
     let level = Level::from_str(&common.log_level)?;
+    // TODO: tracing_appender
     if !common.log_path.is_empty() {
         layers.push(
             tracing_subscriber::fmt::layer()
+                .with_ansi(false)
                 .with_writer(File::options().create(true).append(true).open(&common.log_path)?)
                 .with_filter(LevelFilter::from(level))
                 .boxed()
