@@ -28,7 +28,7 @@ jobs:
         key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
     - id: 'compile'
-      uses: heroku/rust-cargo-musl-action@v1
+      uses: rhysnewell/rust-cargo-musl-action@master
       with:
         command: 'build'
     # - name: Run tests
