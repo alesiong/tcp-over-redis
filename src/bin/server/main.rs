@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 use tokio::{select, time};
 use tokio::net::{TcpListener, TcpStream};
 use tokio_util::task::TaskTracker;
-use tracing::{debug, error, info, instrument};
+use tracing::{debug, error, instrument};
 
 use tcp_over_redis::{config, log, network};
 use tcp_over_redis::cache::connection::Connection;
