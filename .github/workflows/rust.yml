@@ -27,17 +27,19 @@ jobs:
           target/
         key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
 
-    - name: Build
-      run: cargo build --release --verbose
+    - id: 'compile'
+      uses: heroku/rust-cargo-musl-action@v1
+      with:
+        command: 'build'
     # - name: Run tests
     #   run: cargo test --verbose
     - name: Server Bin
       uses: actions/upload-artifact@v4
       with:
         name: server
-        path: target/release/server
+        path: ${{ steps.compile.outputs.release-dir }}/server
     - name: Client Bin
       uses: actions/upload-artifact@v4
       with:
         name: client
-        path: target/release/client
+        path: ${{ steps.compile.outputs.release-dir }}/client
