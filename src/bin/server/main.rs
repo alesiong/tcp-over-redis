@@ -6,16 +6,16 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use tokio::{select, time};
 use tokio::net::{TcpListener, TcpStream};
+use tokio::{select, time};
 use tokio_util::task::TaskTracker;
 use tracing::{debug, error, instrument};
 
-use tcp_over_redis::{config, log, network};
 use tcp_over_redis::cache::connection::Connection;
 use tcp_over_redis::cache::redis::RedisClient;
 use tcp_over_redis::config::ServerConfig;
 use tcp_over_redis::error::{EncodingError, ProxyError};
+use tcp_over_redis::{config, log, network};
 
 #[cfg(feature = "profiling")]
 #[global_allocator]
@@ -23,13 +23,15 @@ static ALLOC: dhat::Alloc = dhat::Alloc;
 
 fn main() -> Result<(), ProxyError> {
     let config_file = std::env::var_os("CONFIG")
-        .map(OsString::into_string).transpose().map_err(EncodingError::OsString)?
+        .map(OsString::into_string)
+        .transpose()
+        .map_err(EncodingError::OsString)?
         .unwrap_or_else(|| "server_config.toml".to_string());
     let server_config: ServerConfig = config::load_config_from_file(&config_file)?;
 
-
     #[cfg(feature = "profiling")]
-    console_subscriber::ConsoleLayer::builder().with_default_env()
+    console_subscriber::ConsoleLayer::builder()
+        .with_default_env()
         .server_addr(SocketAddr::from_str("127.0.0.1:6670").unwrap())
         .init();
     #[cfg(not(feature = "profiling"))]
@@ -47,7 +49,10 @@ async fn tokio_main(server_config: ServerConfig) -> Result<(), ProxyError> {
     let redis_config = if server_config.common.redis_password.is_empty() {
         format!("redis://{}", server_config.common.redis_addr)
     } else {
-        format!("redis://:{}@{}", server_config.common.redis_password, server_config.common.redis_addr)
+        format!(
+            "redis://:{}@{}",
+            server_config.common.redis_password, server_config.common.redis_addr
+        )
     };
 
     let client = RedisClient::new(redis_config).await?;
@@ -64,7 +69,6 @@ async fn run_server(client: RedisClient, server_config: ServerConfig) -> Result<
     let server_config = Arc::new(server_config);
 
     loop {
-        // TODO: timeout
         select! {
            accept = listener.accept() => {
                 let (stream, sock) = match accept {
@@ -79,18 +83,28 @@ async fn run_server(client: RedisClient, server_config: ServerConfig) -> Result<
 
                 tokio::spawn(handle_connection(Arc::clone(&client), stream, Arc::clone(&server_config)));
             }
-            // TODO: error
             _ = tokio::signal::ctrl_c() => return Ok(())
         }
     }
 }
 
 #[instrument(level = "info", skip_all, err(Debug))]
-async fn handle_connection(client: Arc<RedisClient>, stream: TcpStream, server_config: Arc<ServerConfig>) -> Result<(), ProxyError> {
+async fn handle_connection(
+    client: Arc<RedisClient>,
+    stream: TcpStream,
+    server_config: Arc<ServerConfig>,
+) -> Result<(), ProxyError> {
     let timeout = Duration::from_secs(server_config.timeout_second);
     let redis_timeout = Duration::from_millis(server_config.common.redis_timeout_milli);
     let connection_timeout = Duration::from_secs(server_config.common.connection_timeout_second);
-    let connection = Connection::dial(Some(Instant::now() + redis_timeout * 8), redis_timeout, connection_timeout, client, server_config.common.listen_shard).await?;
+    let connection = Connection::dial(
+        Some(Instant::now() + redis_timeout * 8),
+        redis_timeout,
+        connection_timeout,
+        client,
+        server_config.common.listen_shard,
+    )
+    .await?;
 
     let (read_net, write_net) = stream.into_split();
     let (read_conn, write_conn) = connection.split();
@@ -107,6 +121,3 @@ async fn handle_connection(client: Arc<RedisClient>, stream: TcpStream, server_c
 
     Ok(())
 }
-
-
-

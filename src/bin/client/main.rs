@@ -59,6 +59,7 @@ async fn tokio_main(client_config: ClientConfig) -> Result<(), ProxyError> {
 async fn run_client(client: RedisClient, client_config: ClientConfig) -> Result<(), ProxyError> {
     let redis_timeout = Duration::from_millis(client_config.common.redis_timeout_milli);
     let connection_timeout = Duration::from_secs(client_config.common.connection_timeout_second);
+    let timeout = Duration::from_secs(client_config.timeout_second);
 
     let client = Arc::new(client);
     let tracker = TaskTracker::new();
@@ -82,9 +83,8 @@ async fn run_client(client: RedisClient, client_config: ClientConfig) -> Result<
                        
                         debug!(write_pipe=conn.write_pipe_name(), "accepting connection");
 
-                        tokio::spawn(handle_connection(conn, connection_timeout, proxy_to_addr));
+                        tokio::spawn(handle_connection(conn, timeout, connection_timeout, proxy_to_addr));
                     }
-                    // TODO: error
                     _ = tokio::signal::ctrl_c() => return
                 }
             }
@@ -98,10 +98,8 @@ async fn run_client(client: RedisClient, client_config: ClientConfig) -> Result<
 #[instrument(level = "info", fields(
     write_pipe = conn.write_pipe_name(), read_pipe = conn.read_pipe_name()
 ), skip_all, err(Debug))]
-async fn handle_connection(conn: Connection, connection_timeout: Duration, proxy_to_addr: Arc<String>) -> Result<(), ProxyError> {
-
-    // TODO: timeout
-    let stream = TcpStream::connect(proxy_to_addr.as_str()).await?;
+async fn handle_connection(conn: Connection, timeout: Duration, connection_timeout: Duration, proxy_to_addr: Arc<String>) -> Result<(), ProxyError> {
+    let stream = time::timeout(timeout, TcpStream::connect(proxy_to_addr.as_str())).await??;
     let (read_net, write_net) = stream.into_split();
     let (read_conn, write_conn) = conn.split();
 
